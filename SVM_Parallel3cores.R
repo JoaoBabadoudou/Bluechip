@@ -7,15 +7,8 @@ library(rpart.plot)         #    for    plotting    decision    trees
 library(vip)                                           #    for    feature    importance
 library(pdp)
 library(parallel)
-detectCores()
-num_cores <- 2
-
 library(doParallel)
-cluster <- makeCluster(num_cores)
-registerDoParallel(cluster)
-
 library(caret)
-### 
 library(readr)
 df <- read_csv("bluechip-summit-credit-worthiness-prediction/Train.csv")
 
@@ -75,31 +68,43 @@ train_index <- createDataPartition(data$Loan_Status, p = 0.8, list = FALSE)
 train_data <- data[train_index, ]
 test_data <- data[-train_index, ]
 
+# Configurer le cluster pour utiliser 3 cœurs
+cluster <- makeCluster(3)  # Utiliser 3 cœurs
+registerDoParallel(cluster)
+
+
 
 # Configurer trainControl
 train_control <- trainControl(
-  method = "repeatedcv",    # Validation croisée répétée
-  number = 5,               # Nombre de plis dans la validation croisée
-  repeats = 3,              # Nombre de répétitions de la CV
-  allowParallel = TRUE,     # Activer la parallélisation
-  search = "grid"           # Recherche systématique dans une grille
+  method = "repeatedcv",  # Validation croisée répétée
+  number = 5,             # 5 plis
+  repeats = 3,            # 3 répétitions
+  allowParallel = TRUE,   # Activer la parallélisation
+  search = "grid"         # Recherche systématique
 )
 
-# Exemple : Entraînement d'un modèle SVM radial
-svm_model <- train(
+# Définir une grille de recherche optimale
+tune_grid <- expand.grid(
+  sigma = c(0.005, 0.01, 0.05, 0.1),  # Grille pour sigma
+  C = c(0.5, 1, 5, 10)               # Grille pour C
+)
+
+# Entraîner le modèle SVM radial
+svm_model2 <- train(
   Loan_Status ~ .,
-  data = train_data,        # Vos données d'entraînement
-  method = "svmRadial",     # SVM avec noyau radial
+  data = train_data,
+  method = "svmRadial",
   trControl = train_control,
-  tuneGrid = expand.grid(
-    sigma = c(0.01, 0.1, 1),  # Grille pour le paramètre sigma
-    C = c(0.1, 1, 10)         # Grille pour le paramètre C
-  ), weights = weights[train_data$Loan_Status]
-
+  tuneGrid = tune_grid,
+  weights = weights[train_data$Loan_Status]
 )
 
+# Arrêter le cluster après entraînement
+stopCluster(cluster)
+registerDoSEQ()
 
-predictions <- predict(svm_model, newdata = test_data)
+
+predictions <- predict(svm_model2, newdata = test_data)
 
 confusionMatrix(predictions, test_data$Loan_Status)
 
@@ -126,11 +131,11 @@ one_hot_encoded21 <- model.matrix(~ df1$Dependents - 1, df1)
 
 
 colnames(one_hot_encoded21) <- c("Dependents0", "Dependents1", 
-                                "Dependents2",
-                                "Dependents3")
+                                 "Dependents2",
+                                 "Dependents3")
 
 colnames(one_hot_encoded11) <-c("Property_Area0", "Property_Area1", 
-                               "Property_Area2")
+                                "Property_Area2")
 
 
 data1 <- cbind(df1[,c(-2,-5,-13)],one_hot_encoded11, one_hot_encoded21)
@@ -138,14 +143,10 @@ data1 <- cbind(df1[,c(-2,-5,-13)],one_hot_encoded11, one_hot_encoded21)
 data1 <- data1[,-1]
 
 
-predictions_test <- predict(svm_model, newdata = data1 )
+predictions_test <- predict(svm_model2, newdata = data1 )
 
 submission <- data.frame(ID = df1$ID, Loan_Status = predictions_test)
 colnames(submission) <- c("ID", "Loan_Status")  # Adapter aux exigences
 
-write.csv(submission, "submission.csv", row.names = FALSE)
-
-
-stopCluster(cluster)
-
+write.csv(submission, "submission2.csv", row.names = FALSE)
 
