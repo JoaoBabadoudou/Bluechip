@@ -1,6 +1,4 @@
-library(caret)
-library(xgboost)
-library(doParallel)
+# lET'S IMPORT THE DATA
 library(forcats)
 library(caret)
 library(dplyr)
@@ -55,9 +53,9 @@ class_proportions <- prop.table(table(data$Loan_Status))
 # On inverse les proportions pour que la classe minoritaire ait un poids plus élevé
 weights <- 1 / class_proportions
 weights <- weights / sum(weights)  # Normalisation pour que la somme des poids soit égale à 1
-# Assigner les poids pour chaque observation en fonction de sa classe
 
-
+# Afficher les poids
+print(weights)
 
 
 
@@ -70,70 +68,85 @@ train_index <- createDataPartition(data$Loan_Status, p = 0.8, list = FALSE)
 train_data <- data[train_index, ]
 test_data <- data[-train_index, ]
 
-# Convertir les niveaux en noms valides en utilisant make.names()
-levels(train_data$Loan_Status) <- make.names(levels(train_data$Loan_Status))
-
-
-weights_per_observation <- ifelse(train_data$Loan_Status == "1", 
-                                  weights["1"], 
-                                  weights["0"])
-
-# Afficher les poids
-print(weights_per_observation)
 # Configurer le cluster pour utiliser 3 cœurs
-cluster <- makeCluster(3)
+cluster <- makeCluster(3)  # Utiliser 3 cœurs
 registerDoParallel(cluster)
 
 
-# Configurer trainControl avec parallélisation
+
+# Configurer trainControl
 train_control <- trainControl(
-  method = "repeatedcv",    # Validation croisée répétée
-  number = 5,               # 5 plis
-  repeats = 3,              # Répétée 3 fois
-  classProbs = TRUE,        # Calculer les probabilités pour les métriques comme ROC
-  summaryFunction = twoClassSummary,  # Optimiser sur AUC
-  allowParallel = TRUE      # Activer la parallélisation
+  method = "repeatedcv",  # Validation croisée répétée
+  number = 5,             # 5 plis
+  repeats = 3,            # 3 répétitions
+  allowParallel = TRUE,   # Activer la parallélisation
+  search = "grid"         # Recherche systématique
 )
 
-
-# Configuration de la grille d'hyperparamètres pour xgboost
+# Définir une grille de recherche optimale
 tune_grid <- expand.grid(
-  nrounds = c(50, 100),            # Nombre d'itérations
-  max_depth = c(3, 6),             # Profondeur maximale
-  eta = c(0.01, 0.1),              # Taux d'apprentissage
-  gamma = c(0, 1),                 # Régularisation
-  colsample_bytree = c(0.8, 1),    # Sous-échantillonnage des colonnes
-  min_child_weight = c(1, 3),      # Poids minimum pour un nœud
-  subsample = c(0.8, 1)            # Sous-échantillonnage des observations
+  sigma = c(0.005, 0.01, 0.05, 0.1),  # Grille pour sigma
+  C = c(0.5, 1, 5, 10)               # Grille pour C
 )
 
-# Entraînement du modèle avec caret
-xgb_model <- train(
-  Loan_Status ~ ., 
-  data = train_data,weights = weights_per_observation,
-  method = "xgbTree",              # Utiliser l'intégration xgboost dans caret
+# Entraîner le modèle SVM radial
+svm_model2 <- train(
+  Loan_Status ~ .,
+  data = train_data,
+  method = "svmRadial",
   trControl = train_control,
   tuneGrid = tune_grid,
-  metric = "Accuracy"                   # Optimisation basée sur l'AUC
+  weights = weights[train_data$Loan_Status]
 )
 
-
-# Stopper le cluster
+# Arrêter le cluster après entraînement
 stopCluster(cluster)
 registerDoSEQ()
 
-predictions <- predict(xgb_model, newdata = test_data)
-levels(predictions)
-# Créez un vecteur de correspondance entre les niveaux "X1", "X0" et "1", "0"
-pred_levels <- c("X0" = "0", "X1" = "1")
 
-# Modifier les prédictions pour les rendre compatibles avec les niveaux d'origine
-predictions <- recode(predictions, !!!pred_levels)
-
-# Vérifier les nouvelles valeurs de prédiction
-print(predictions)
-
+predictions <- predict(svm_model2, newdata = test_data)
 
 confusionMatrix(predictions, test_data$Loan_Status)
 
-# This model is not good in Accuracy
+##############  Prediction  ##########################
+
+df1 <- read_csv("bluechip-summit-credit-worthiness-prediction/Test.csv")
+
+df1$Dependents <- df1$Dependents %>%
+  fct_recode(
+    "3" = "3+")
+
+df1$Gender <- factor(df1$Gender)  
+df1$Married <- factor(df1$Married)
+df1$Education <- factor(df1$Education)
+df1$Self_Employed <- factor(df1$Self_Employed)
+df1$Credit_History <- factor(df1$Credit_History)
+df1$Property_Area <- factor(df1$Property_Area)
+df1$Dependents <- factor(df1$Dependents)
+
+######### One hot encoded pour les variables quali
+
+one_hot_encoded11 <- model.matrix(~ df1$Property_Area- 1, df1)
+one_hot_encoded21 <- model.matrix(~ df1$Dependents - 1, df1)
+
+
+colnames(one_hot_encoded21) <- c("Dependents0", "Dependents1", 
+                                 "Dependents2",
+                                 "Dependents3")
+
+colnames(one_hot_encoded11) <-c("Property_Area0", "Property_Area1", 
+                                "Property_Area2")
+
+
+data1 <- cbind(df1[,c(-2,-5,-13)],one_hot_encoded11, one_hot_encoded21)
+
+data1 <- data1[,-1]
+
+
+predictions_test <- predict(svm_model2, newdata = data1 )
+
+submission <- data.frame(ID = df1$ID, Loan_Status = predictions_test)
+colnames(submission) <- c("ID", "Loan_Status")  # Adapter aux exigences
+
+write.csv(submission, "submission3.csv", row.names = FALSE)
+
