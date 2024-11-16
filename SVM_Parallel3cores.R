@@ -77,7 +77,7 @@ registerDoParallel(cluster)
 # Configurer trainControl
 train_control <- trainControl(
   method = "repeatedcv",  # Validation croisée répétée
-  number = 5,             # 5 plis
+  number = 10,             # 5 plis
   repeats = 3,            # 3 répétitions
   allowParallel = TRUE,   # Activer la parallélisation
   search = "grid"         # Recherche systématique
@@ -85,9 +85,9 @@ train_control <- trainControl(
 
 # Définir une grille de recherche optimale
 tune_grid <- expand.grid(
-  sigma = c(0.005, 0.01, 0.05, 0.1),  # Grille pour sigma
-  C = c(0.5, 1, 5, 10)               # Grille pour C
-)
+  sigma = c(0.005, 0.1),  # Grille pour sigma
+  C = c(0.5,1,) )              # Grille pour C
+
 
 # Entraîner le modèle SVM radial
 svm_model2 <- train(
