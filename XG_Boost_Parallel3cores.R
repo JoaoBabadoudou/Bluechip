@@ -18,14 +18,14 @@ df$Dependents <- df$Dependents %>%
   fct_recode(
     "3" = "3+")
 
-df$Gender <- as.numeric(df$Gender)  
-df$Married <- as.numeric(df$Married)
-df$Education <- as.numeric(df$Education)
-df$Self_Employed <- as.numeric(df$Self_Employed)
-df$Credit_History <- as.numeric(df$Credit_History)
+df$Gender <- factor(df$Gender)  
+df$Married <- factor(df$Married)
+df$Education <- factor(df$Education)
+df$Self_Employed <- factor(df$Self_Employed)
+df$Credit_History <- factor(df$Credit_History)
 df$Property_Area <- factor(df$Property_Area)
 df$Dependents <- factor(df$Dependents)
-df$Loan_Status <- as.numeric(df$Loan_Status )
+df$Loan_Status <- factor(df$Loan_Status )
 str(df)
 
 ######### One hot encoded pour les variables quali
@@ -55,12 +55,12 @@ class_proportions <- prop.table(table(data$Loan_Status))
 # On inverse les proportions pour que la classe minoritaire ait un poids plus élevé
 weights <- 1 / class_proportions
 weights <- weights / sum(weights)  # Normalisation pour que la somme des poids soit égale à 1
-
-# Afficher les poids
-print(weights[train_data$Loan_Status])
+# Assigner les poids pour chaque observation en fonction de sa classe
 
 
-str(data)
+
+
+
 ########
 
 # Diviser les données en entraînement et test
@@ -70,51 +70,68 @@ train_index <- createDataPartition(data$Loan_Status, p = 0.8, list = FALSE)
 train_data <- data[train_index, ]
 test_data <- data[-train_index, ]
 
+# Convertir les niveaux en noms valides en utilisant make.names()
+levels(train_data$Loan_Status) <- make.names(levels(train_data$Loan_Status))
+
+
+weights_per_observation <- ifelse(train_data$Loan_Status == "1", 
+                                  weights["1"], 
+                                  weights["0"])
+
+# Afficher les poids
+print(weights_per_observation)
 # Configurer le cluster pour utiliser 3 cœurs
 cluster <- makeCluster(3)
 registerDoParallel(cluster)
 
-# Préparation des poids
-class_weights <- table(train_data$Loan_Status)
-weights <- ifelse(train_data$Loan_Status == "1", 
-                  class_weights["0"] / class_weights["1"], 1)
 
-# Conversion des données en format xgboost
-xgb_train <- xgb.DMatrix(
-  data = as.matrix(train_data[, -which(names(train_data) == "Loan_Status")]),
-  label = as.numeric(train_data$Loan_Status == "1"),
-  weight = weights[train_data$Loan_Status]
+# Configurer trainControl avec parallélisation
+train_control <- trainControl(
+  method = "repeatedcv",    # Validation croisée répétée
+  number = 5,               # 5 plis
+  repeats = 3,              # Répétée 3 fois
+  classProbs = TRUE,        # Calculer les probabilités pour les métriques comme ROC
+  summaryFunction = twoClassSummary,  # Optimiser sur AUC
+  allowParallel = TRUE      # Activer la parallélisation
 )
 
-# Configuration des paramètres pour xgboost
-params <- list(
-  objective = "binary:logistic",   # Log-loss pour classification binaire
-  eval_metric = "auc",            # AUC comme métrique
-  eta = 0.1,                      # Taux d'apprentissage
-  max_depth = 6,                  # Profondeur maximale des arbres
-  subsample = 0.8,                # Sous-échantillonnage des données
-  colsample_bytree = 0.8          # Sous-échantillonnage des colonnes
+
+# Configuration de la grille d'hyperparamètres pour xgboost
+tune_grid <- expand.grid(
+  nrounds = c(50, 100),            # Nombre d'itérations
+  max_depth = c(3, 6),             # Profondeur maximale
+  eta = c(0.01, 0.1),              # Taux d'apprentissage
+  gamma = c(0, 1),                 # Régularisation
+  colsample_bytree = c(0.8, 1),    # Sous-échantillonnage des colonnes
+  min_child_weight = c(1, 3),      # Poids minimum pour un nœud
+  subsample = c(0.8, 1)            # Sous-échantillonnage des observations
 )
 
-# Entraînement du modèle
-xgb_model <- xgb.train(
-  params = params,
-  data = xgb_train,
-  nrounds = 100,                 # Nombre d'itérations
-  verbose = 1,
-  nthread = 3                    # Parallélisation
+# Entraînement du modèle avec caret
+xgb_model <- train(
+  Loan_Status ~ ., 
+  data = train_data,weights = weights_per_observation,
+  method = "xgbTree",              # Utiliser l'intégration xgboost dans caret
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  metric = "Accuracy"                   # Optimisation basée sur l'AUC
 )
+
 
 # Stopper le cluster
 stopCluster(cluster)
 registerDoSEQ()
 
-# Prédictions
-xgb_test <- xgb.DMatrix(as.matrix(test_data[, -which(names(test_data) == "Loan_Status")]))
-predictions <- predict(xgb_model, xgb_test)
+predictions <- predict(xgb_model, newdata = test_data)
+levels(predictions)
+# Créez un vecteur de correspondance entre les niveaux "X1", "X0" et "1", "0"
+pred_levels <- c("X0" = "0", "X1" = "1")
 
-# Seuil de classification
-predictions_class <- factor(ifelse(predictions > 0.5, "1", "0"))
+# Modifier les prédictions pour les rendre compatibles avec les niveaux d'origine
+predictions <- recode(predictions, !!!pred_levels)
 
-# Évaluer les performances
-confusionMatrix(predictions_class, factor(test_data$Loan_Status))
+# Vérifier les nouvelles valeurs de prédiction
+print(predictions)
+
+
+confusionMatrix(predictions, test_data$Loan_Status)
