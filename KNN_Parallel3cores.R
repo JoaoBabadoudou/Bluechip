@@ -76,7 +76,7 @@ registerDoParallel(cluster)
 # Configurer trainControl pour la validation croisée avec parallélisation
 train_control <- trainControl(
   method = "repeatedcv",  # Validation croisée répétée
-  number = 50,             # 5 plis pour la validation croisée
+  number = 100,             # 5 plis pour la validation croisée
   repeats = 3,            # 3 répétitions pour une meilleure évaluation
   allowParallel = TRUE,   # Activer la parallélisation
   search = "grid"         # Recherche systématique dans la grille
@@ -84,7 +84,7 @@ train_control <- trainControl(
 
 # Grille de recherche pour KNN
 tune_grid <- expand.grid(
-  k = c(35:40)   # Nombre de voisins à tester
+  k = c(40:60)   # Nombre de voisins à tester
 )
 
 
@@ -101,12 +101,53 @@ knn_model <- train(
 
 # Afficher les meilleurs paramètres
 print(knn_model$bestTune)
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+
+#+
+# Configurer trainControl pour la validation croisée avec parallélisation
+train_control <- trainControl(
+  method = "repeatedcv",  # Validation croisée répétée
+  number = 5,             # 5 plis pour la validation croisée
+  repeats = 3,            # 3 répétitions pour une meilleure évaluation
+  allowParallel = TRUE,   # Activer la parallélisation
+  search = "grid"         # Recherche systématique dans la grille
+)
+
+# Grille de recherche pour KNN
+tune_grid <- expand.grid(
+  kmax = seq(20, 30, by = 2),          # Tester des valeurs impaires pour k
+  distance = c(1, 2),                 # 1 = Manhattan, 2 = Euclidienne
+  kernel = c("rectangular", "triangular")  # Types de noyaux
+)
+
+
+# Entraînement du modèle KNN avec le train() de caret
+knn_model2 <- train(
+  Loan_Status ~ .,             # Variable dépendante
+  data = train_data,           # Vos données d'entraînement
+  method = "kknn",              # KNN (k-nearest neighbors)
+  trControl = train_control,   # Validation croisée avec parallélisation
+  tuneGrid = tune_grid,        # Grille de recherche pour KNN
+  preProcess = c("center", "scale"),
+  weights = weights[train_data$Loan_Status] 
+)
+
+# Afficher les meilleurs paramètres
+print(knn_model2$bestTune)
+
+
+
+#++++++++++++++=================================
+
+
 # Arrêter le cluster après entraînement
 stopCluster(cluster)
 registerDoSEQ()
 
 
 predictions <- predict(knn_model , newdata = test_data)
+
+predictions <- predict(knn_model2 , newdata = test_data)
 
 confusionMatrix(predictions, test_data$Loan_Status)
 
@@ -145,10 +186,10 @@ data1 <- cbind(df1[,c(-2,-5,-13)],one_hot_encoded11, one_hot_encoded21)
 data1 <- data1[,-1]
 
 
-predictions_test <- predict(knn_model , newdata = data1 )
+predictions_test <- predict(knn_model2 , newdata = data1 )
 
 submission <- data.frame(ID = df1$ID, Loan_Status = predictions_test)
 colnames(submission) <- c("ID", "Loan_Status")  # Adapter aux exigences
 
-write.csv(submission, "submission4.csv", row.names = FALSE)
+write.csv(submission, "submission7.csv", row.names = FALSE)
 

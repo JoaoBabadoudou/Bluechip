@@ -89,16 +89,43 @@ sum(is.na(train_data))  # Compte les valeurs manquantes
 # Définir une formule de modèle
 formula <- Loan_Status ~ .  # Votre variable dépendante
 
-# Construire un modèle de réseau de neurones avec plusieurs couches
+# Normaliser les données pour éviter des poids excessifs
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+train_data_normalized <- as.data.frame(lapply(train_data, normalize))
+
+# Normaliser les données de test avec les mêmes min/max que les données d'entraînement
+normalize_with_train <- function(x, min_train, max_train) {
+  return((x - min_train) / (max_train - min_train))
+}
+
+# Normalisation des données de test en utilisant les min/max des données d'entraînement
+test_data_normalized <- as.data.frame(mapply(
+  normalize_with_train,
+  x = test_data,
+  min_train = sapply(train_data, min),
+  max_train = sapply(train_data, max)
+))
+
+# S'assurer que les colonnes correspondent exactement
+test_data_normalized <- test_data_normalized[names(train_data_normalized)]
+
+
+# Définir une architecture adaptée
+hidden_layers <- c(8, 6, 4)  # Trois couches avec des tailles décroissantes pour optimiser les calculs
+
+# Entraîner le modèle
 nn_model <- neuralnet(
   formula,                    # Formule avec la variable cible et les prédicteurs
-  data = train_data,           # Données d'entraînement
-  hidden = c(20, 15, 10, 5),       # Trois couches cachées avec respectivement 15, 10 et 5 neurones
-  linear.output = FALSE,       # Pour classification (si TRUE, pour régression)
-  threshold = 0.01,            # Critère d'arrêt (si l'erreur quadratique moyenne est inférieure à ce seuil)
-  stepmax = 1e6                # Nombre maximal d'itérations pour l'entraînement
+  data = train_data_normalized,  # Données normalisées
+  hidden = hidden_layers,        # Architecture des couches cachées
+  linear.output = FALSE,         # Classification
+  threshold = 0.01,              # Critère d'arrêt
+  stepmax = 1e5,                 # Limiter le nombre d'itérations pour éviter une surcharge
+  lifesign = "minimal"           # Afficher des mises à jour minimales pendant l'entraînement
 )
-
 # Résumé du modèle
 summary(nn_model)
 
@@ -108,7 +135,10 @@ stopCluster(cluster)
 registerDoSEQ()
 
 
-predictions <- predict(nn_model, newdata = test_data)
+predictions <- predict(nn_model, newdata =test_data_normalized)
+
+str(test_data_normalized)
+str(train_data_normalized)
 
 predictions <-  factor( ifelse(predictions > 0.5, 1, 0))
 
@@ -148,12 +178,12 @@ data1 <- cbind(df1[,c(-2,-5,-13)],one_hot_encoded11, one_hot_encoded21)
 
 data1 <- data1[,-1]
 
-data1[] <- lapply(train_data, function(x) as.numeric(as.character(x)))
+data1[] <- lapply(data1, function(x) as.numeric(as.character(x)))
 
 predictions_test <- predict(nn_model , newdata = data1 )
 predictions_test <-  factor( ifelse(predictions_test> 0.5, 1, 0))
 submission <- data.frame(ID = df1$ID, Loan_Status = predictions_test)
 colnames(submission) <- c("ID", "Loan_Status")  # Adapter aux exigences
 
-write.csv(submission, "submission4.csv", row.names = FALSE)
+write.csv(submission, "submission5.csv", row.names = FALSE)
 

@@ -86,7 +86,7 @@ train_control <- trainControl(
 # Définir une grille de recherche optimale
 tune_grid <- expand.grid(
   sigma = c(0.005, 0.1),  # Grille pour sigma
-  C = c(0.5,1,) )              # Grille pour C
+  C = c(0.5,1) )              # Grille pour C
 
 
 # Entraîner le modèle SVM radial
@@ -98,6 +98,20 @@ svm_model2 <- train(
   tuneGrid = tune_grid,
   weights = weights[train_data$Loan_Status]
 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Arrêter le cluster après entraînement
 stopCluster(cluster)
